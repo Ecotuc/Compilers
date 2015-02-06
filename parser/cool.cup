@@ -1,0 +1,279 @@
+/*
+ *  cool.cup
+ *              Parser definition for the COOL language.
+ *
+ */
+
+import java_cup.runtime.*;
+
+/* Stuff enclosed in {: :} is copied verbatim to the class containing
+all parser actions.  All the extra variables/functions you want to use
+in the semantic actions should go here.  Don't remove or modify anything
+that was there initially.  */
+
+action code {: 
+
+    int curr_lineno() {
+	return ((CoolTokenLexer)parser.getScanner()).curr_lineno();
+    }
+
+    AbstractSymbol curr_filename() {
+	return ((CoolTokenLexer)parser.getScanner()).curr_filename();
+    }
+:} 
+
+/************************************************************************/
+/*                DONT CHANGE ANYTHING IN THIS SECTION                  */
+
+parser code {:
+    int omerrs = 0;
+
+    public void syntax_error(Symbol cur_token) {
+        int lineno = action_obj.curr_lineno();
+	String filename = action_obj.curr_filename().getString();
+        System.err.print("\"" + filename + "\", line " + lineno + 
+		         ": parse error at or near ");
+        Utilities.printToken(cur_token);
+	omerrs++;
+	if (omerrs>50) {
+	   System.err.println("More than 50 errors");
+	   System.exit(1);
+	}
+    }
+
+    public void unrecovered_syntax_error(Symbol cur_token) {
+    }
+:}
+
+/* Declare the terminals; a few have types for associated lexemes.  The
+token ERROR is never used in the parser; thus, it is a parse error when
+the lexer returns it.  */
+
+/* Terminals */
+/**************************************************************************/
+terminal CLASS, ELSE, FI, IF, IN, INHERITS, LET, LET_STMT, LOOP, POOL, THEN, WHILE;
+terminal CASE, ESAC, OF, DARROW, NEW, ISVOID;
+terminal ASSIGN, NOT, LE, ERROR;
+terminal PLUS, DIV, MINUS, MULT, EQ, LT, DOT, NEG, COMMA, SEMI, COLON;
+terminal LPAREN, RPAREN, AT, LBRACE, RBRACE;
+terminal AbstractSymbol STR_CONST, INT_CONST;
+terminal Boolean BOOL_CONST;
+terminal AbstractSymbol TYPEID, OBJECTID;
+/**************************************************************************/
+
+/*  DON'T CHANGE ANYTHING ABOVE THIS LINE, OR YOUR PARSER WONT WORK       */
+/**************************************************************************/
+
+   /* Complete the nonterminal list below, giving a type for the semantic
+      value of each non terminal. (See the CUP documentation for details. */
+
+/* Non-terminals */
+/**************************************************************************/
+/* Program */
+nonterminal programc program;
+
+/* ListNode */
+nonterminal Classes class_list;		// class class ... class	// ";" is included in class
+nonterminal Features optional_feature_list;	// feature feature ... feature  // ";" is included in feature
+nonterminal Formals optional_formal_list;	// formal, formal, ..., formal
+nonterminal Expressions optional_expr_list1;	// expr, expr, ..., expr
+nonterminal Expressions expr_list2;	// expr; expr; ...; expr;
+nonterminal Cases branch_list;		// branch branch ... branch	// ";" is included in branch
+
+/* Class_ */
+nonterminal class_c class;
+
+/* Feature */
+nonterminal Feature feature;
+
+/* Formal */
+nonterminal formalc formal;
+
+/* Expression */
+nonterminal Expression expr;
+nonterminal Expression let_stmt;
+nonterminal branch branch;
+/**************************************************************************/
+
+/* Precedences */
+/**************************************************************************/
+precedence right ASSIGN;
+precedence right NOT;
+precedence nonassoc LT, LE, EQ;
+precedence left PLUS, MINUS;
+precedence left MULT, DIV;
+precedence left ISVOID;
+precedence right NEG;
+precedence left AT;
+precedence left DOT;
+/**************************************************************************/
+
+/* Grammars */
+/**************************************************************************/
+start with program;
+
+program	
+	::= class_list:cl
+	    {: RESULT = new programc(curr_lineno(), cl); :}
+        ;
+
+class_list
+	/* single class */
+	::= class:c
+	    {: RESULT = (new Classes(curr_lineno())).appendElement(c); :}
+	/* several classes */
+	| class_list:cl class:c
+	    {: RESULT = cl.appendElement(c); :}
+	;
+
+/* If no parent is specified, the class inherits from the Object class */
+class
+	::= CLASS TYPEID:n LBRACE optional_feature_list:f RBRACE SEMI
+	    {: RESULT = new class_c(curr_lineno(), n, 
+		                   AbstractTable.idtable.addString("Object"), 
+				   f, curr_filename()); :}
+	| CLASS TYPEID:n INHERITS TYPEID:p LBRACE optional_feature_list:f RBRACE SEMI
+	    {: RESULT = new class_c(curr_lineno(), n, p, f, curr_filename()); :}
+	| error SEMI
+	;
+
+/* Feature list may be empty, but no empty features in list. */
+optional_feature_list
+	::= /* empty */
+	    {: RESULT = new Features(curr_lineno()); :}
+	| optional_feature_list:fl feature:f
+	    {: RESULT = fl.appendElement(f); :}
+	;
+
+feature
+	::= OBJECTID:a1 COLON TYPEID:a2 SEMI
+	    {: RESULT = new attr(curr_lineno(), a1, a2, new no_expr(curr_lineno())); :}
+	| OBJECTID:a1 COLON TYPEID:a2 ASSIGN expr:a3 SEMI
+	    {: RESULT = new attr(curr_lineno(), a1, a2, a3); :}
+	| OBJECTID:a1 LPAREN optional_formal_list:a2 RPAREN COLON TYPEID:a3 LBRACE expr:a4 RBRACE SEMI
+	    {: RESULT = new method(curr_lineno(), a1, a2, a3, a4); :}
+	| error SEMI
+	;
+
+optional_formal_list
+	::=
+	    {: RESULT = new Formals(curr_lineno()); :}
+	| formal:f
+	    {: RESULT = (new Formals(curr_lineno())).appendElement(f); :}
+	| optional_formal_list:fl COMMA formal:f
+	    {: RESULT = fl.appendElement(f); :}
+	;
+	
+formal
+	::= OBJECTID:a1 COLON TYPEID:a2
+	    {: RESULT = new formalc(curr_lineno(), a1, a2); :}
+	;
+
+optional_expr_list1
+	::=
+	    {: RESULT = new Expressions(curr_lineno()); :}
+	| expr:e
+	    {: RESULT = (new Expressions(curr_lineno())).appendElement(e); :}
+	| optional_expr_list1:el COMMA expr:e
+	    {: RESULT = el.appendElement(e); :}
+	;
+
+expr_list2
+	::= expr:e SEMI
+	    {: RESULT = (new Expressions(curr_lineno())).appendElement(e); :}
+	| expr_list2:el expr:e SEMI
+	    {: RESULT = el.appendElement(e); :}
+	| error SEMI
+	    {: RESULT = (new Expressions(curr_lineno())); :}
+	;
+
+let_stmt
+	::= OBJECTID:a1 COLON TYPEID:a2 IN expr:a4
+	    {: RESULT = new let(curr_lineno(), 
+	                a1, a2, new no_expr(curr_lineno()), a4); :}
+	| OBJECTID:a1 COLON TYPEID:a2 ASSIGN expr:a3 IN expr:a4
+	    {: RESULT = new let(curr_lineno(), a1, a2, a3, a4); :}
+	| OBJECTID:a1 COLON TYPEID:a2 COMMA let_stmt:a4
+	    {: RESULT = new let(curr_lineno(), 
+	                a1, a2, new no_expr(curr_lineno()), a4); :}
+	| OBJECTID:a1 COLON TYPEID:a2 ASSIGN expr:a3 COMMA let_stmt:a4
+	    {: RESULT = new let(curr_lineno(), a1, a2, a3, a4); :}
+	| error COMMA let_stmt
+	;
+
+branch
+	::= OBJECTID:a1 COLON TYPEID:a2 DARROW expr:a3 SEMI
+	    {: RESULT = new branch(curr_lineno(), a1, a2, a3); :}
+	;
+
+branch_list
+	::= branch:b
+	    {: RESULT = (new Cases(curr_lineno())).appendElement(b); :}
+	| branch_list:bl branch:b
+	    {: RESULT = bl.appendElement(b); :}
+	;
+
+expr
+	::= OBJECTID:a1 ASSIGN expr:a2
+	    {: RESULT = new assign(curr_lineno(), a1, a2); :}
+	| expr:a1 AT TYPEID:a2 DOT OBJECTID:a3 LPAREN optional_expr_list1:a4 RPAREN
+	    {: RESULT = new static_dispatch(curr_lineno(), a1, a2, a3, a4); :}
+	| expr:a1 DOT OBJECTID:a2 LPAREN optional_expr_list1:a3 RPAREN
+	    {: RESULT = new dispatch(curr_lineno(), a1, a2, a3); :}
+	| OBJECTID:a2 LPAREN optional_expr_list1:a3 RPAREN
+	    {: RESULT = new dispatch(curr_lineno(), 
+	       new object(curr_lineno(), 
+	           AbstractTable.idtable.addString("self")), a2, a3); :}
+	| IF expr:a1 THEN expr:a2 ELSE expr:a3 FI
+	    {: RESULT = new cond(curr_lineno(), a1, a2, a3); :}
+	| WHILE expr:a1 LOOP expr:a2 POOL
+	    {: RESULT = new loop(curr_lineno(), a1, a2); :}
+	| LBRACE expr_list2:el RBRACE
+	    {: RESULT = new block(curr_lineno(), el); :}
+	| LET let_stmt:l
+	    {: RESULT = l; :}
+	| CASE expr:a1 OF branch_list:a2 ESAC
+	    {: RESULT = new typcase(curr_lineno(), a1, a2); :}
+	| NEW TYPEID:a1
+	    {: RESULT = new new_(curr_lineno(), a1); :}
+	| ISVOID expr:a1
+	    {: RESULT = new isvoid(curr_lineno(), a1); :}
+	| expr:a1 PLUS expr:a2
+	    {: RESULT = new plus(curr_lineno(), a1, a2); :}
+	| expr:a1 MINUS expr:a2
+	    {: RESULT = new sub(curr_lineno(), a1, a2); :}
+	| expr:a1 MULT expr:a2
+	    {: RESULT = new mul(curr_lineno(), a1, a2); :}
+	| expr:a1 DIV expr:a2
+	    {: RESULT = new divide(curr_lineno(), a1, a2); :}
+	| NEG expr:a1
+	    {: RESULT = new neg(curr_lineno(), a1); :}
+	| expr:a1 LT expr:a2
+	    {: RESULT = new lt(curr_lineno(), a1, a2); :}
+	| expr:a1 LE expr:a2
+	    {: RESULT = new leq(curr_lineno(), a1, a2); :}
+	| expr:a1 EQ expr:a2
+	    {: RESULT = new eq(curr_lineno(), a1, a2); :}
+	| NOT expr:a1
+	    {: RESULT = new comp(curr_lineno(), a1); :}
+	| LPAREN expr:e RPAREN
+	    {: RESULT = e; :}
+	| OBJECTID:a1
+	    {: RESULT = new object(curr_lineno(), a1); :}
+	| INT_CONST:a1
+	    {: RESULT = new int_const(curr_lineno(), a1); :}
+	| STR_CONST:a1
+	    {: RESULT = new string_const(curr_lineno(), a1); :}
+	| BOOL_CONST:a1
+	    {: RESULT = new bool_const(curr_lineno(), a1); :}
+	;
+/**************************************************************************/
+
+
+
+
+
+
+
+
+
