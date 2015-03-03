@@ -329,8 +329,8 @@ class programc extends Program {
         /* some semantic analysis code may go here */
         classTable.buildEnvironment();
         for (Enumeration e = classes.getElements(); e.hasMoreElements();) {
-            class_c class_c = (class_c) e.nextElement();
-            class_c.semant(classTable);
+            class_c curClass = (class_c) e.nextElement();
+            curClass.semant(classTable);
         }
 
         if (classTable.errors()) {
@@ -488,21 +488,30 @@ class method extends Feature {
     public void semant(ClassTable classTable, class_c curClass) {
         if (!classTable.containsClass(return_type)
             && return_type != TreeConstants.SELF_TYPE) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": Undefined class: " + return_type);
+            classTable.semantError().format(
+                    "%s:%s: Undefined return type %s in method %s.\n",
+                    curClass.filename, lineNumber, return_type, name);
             return_type = TreeConstants.Object_;
         }
         
-        ArrayList<AbstractSymbol> paraList = 
+        ArrayList<AbstractSymbol> paraList1 = 
                 classTable.queryMethodEnvironment(curClass.parent, name);
         ArrayList<AbstractSymbol> paraList2 = 
                 classTable.queryMethodEnvironment(curClass.name, name);
-        if (paraList != null &&
-                !paraList.equals(paraList2)) {
-            classTable.semantError().println(curClass.getFilename()
-                    + ":" + lineNumber + ": In redefined method "
-                    + name + ", parameter type " + paraList2
-                    + " is different from original type " + paraList);
+        if (paraList1 != null) {
+            if (paraList1.size() != paraList2.size()) {
+                classTable.semantError().format(
+                        "%s:%s: Incompatible number of formal parameters in redefined method %s.\n",
+                        curClass.filename, lineNumber, name);
+            } else {
+                for (int i = 1; i < paraList1.size() - 1; i += 2) {
+                    if (paraList1.get(i) != paraList2.get(i)) {
+                        classTable.semantError().format(
+                                "%s:%s: In redefined method %s, parameter type %s is different from original type %s.\n",
+                                curClass.filename, lineNumber, name, paraList2.get(i), paraList1.get(i));
+                    }
+                }
+            }
         }
         
         SymbolTable env = classTable.objEnv.get(curClass.name);
@@ -510,22 +519,25 @@ class method extends Feature {
         for (Enumeration e = formals.getElements(); e.hasMoreElements(); ) {
             formalc f = (formalc) e.nextElement();
             if (f.name == TreeConstants.self) {
-                classTable.semantError().println(
-                        curClass.getFilename() + ":" + lineNumber
-                        + ": 'self' cannot be the name of a formal parameter.");
+                classTable.semantError().format(
+                        "%s:%s: 'self' cannot be the name of a formal parameter.\n",
+                        curClass.filename, lineNumber);
             }
             if (f.type_decl == TreeConstants.SELF_TYPE) {
-                classTable.semantError(curClass).println(
-                        lineNumber + ": formal parameters must not have type SELF_TYPE.");
+                classTable.semantError().format(
+                        "%s:%s: Formal parameter %s cannot have type SELF_TYPE.\n",
+                        curClass.filename, lineNumber, f.name);
                 f.type_decl = TreeConstants.Object_;
             } else if (!classTable.containsClass(f.type_decl)) {
-                classTable.semantError(curClass).println(
-                        lineNumber + ": " + f.type_decl + " undefined.");
+                classTable.semantError().format(
+                        "%s:%s: Undefined type %s for formal parameter %s.\n",
+                        curClass.filename, lineNumber, f.type_decl, f.name);
                 f.type_decl = TreeConstants.Object_;
             }
             if (env.probe(f.name) != null) {
-                classTable.semantError(curClass).println(
-                        lineNumber + ": parameter redefined: " + f.name + ".");
+                classTable.semantError().format(
+                        "%s:%s: Formal parameter %s is multiply defined.\n",
+                        curClass.filename, lineNumber, f.name);
             } else {
                 env.addId(f.name, f.type_decl);
             }
@@ -535,8 +547,9 @@ class method extends Feature {
         env.exitScope();
         AbstractSymbol type = expr.get_type();
         if (!classTable.isChild(return_type, type, curClass.name)) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": " + type + " is not a subclass of " + return_type);
+            classTable.semantError().format(
+                    "%s:%s: Inferred return type %s of method %s does not conform to declared return type %s.\n",
+                    curClass.filename, lineNumber, type, name, return_type);
         }
     }
 
@@ -595,24 +608,27 @@ class attr extends Feature {
     @Override
     public void semant(ClassTable classTable, class_c curClass) {
         if (name == TreeConstants.self) {
-            classTable.semantError().println(
-                    curClass.getFilename() + ":" + lineNumber + ": 'self' cannot be the name of an attribute.");
+            classTable.semantError().format(
+                    "%s:%s: 'self' cannot be the name of an attribute.\n",
+                    curClass.filename, lineNumber);
         } else if (classTable.queryObjectEnvironment(curClass.parent, name) != null) {
-            classTable.semantError().println(
-                    curClass.getFilename() + ":" + lineNumber + ": Attribute "
-                    + name + " is an attribute of an inherited class.");
+            classTable.semantError().format(
+                    "%s:%s: Attribute %s is an attribute of an inherited class.\n",
+                    curClass.filename, lineNumber, name);
         }
         if (!classTable.containsClass(type_decl)
             && type_decl != TreeConstants.SELF_TYPE) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": Undefined class: " + type_decl);
+            classTable.semantError().format(
+                    "%s:%s: Undefined type %s for attribute %s.\n",
+                    curClass.filename, lineNumber, type_decl, name);
             type_decl = TreeConstants.Object_;
         }
         init.semant(classTable, curClass);
         AbstractSymbol type = init.get_type();
         if (!classTable.isChild(type_decl, type, curClass.name)) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": " + type + " is not a subclass of " + type_decl);
+            classTable.semantError().format(
+                    "%s:%s: Inferred type %s of initialization of attribute %s does not conform to declared type %s.\n",
+                    curClass.filename, lineNumber, type, name, type_decl);
         }
     }
 
@@ -715,18 +731,21 @@ class branch extends Case {
     
     public void semant(ClassTable classTable, class_c curClass) {
         if (type_decl == TreeConstants.SELF_TYPE) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": SELF_TYPE must not be used in branch.");
+            classTable.semantError().format(
+                    "%s:%s: Case statement cannot have branch SELF_TYPE.\n",
+                    curClass.filename, lineNumber);
             type_decl = TreeConstants.Object_;
         } else if (!classTable.containsClass(type_decl)) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": type " + type_decl + " undefined.");
+            classTable.semantError().format(
+                    "%s:%s: Undefined type %s in case statement.\n",
+                    curClass.filename, lineNumber, type_decl);
             type_decl = TreeConstants.Object_;
         }
         
         if (name == TreeConstants.self) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": must not bind self in case.");
+            classTable.semantError().format(
+                    "%s:%s: 'self' cannot be bound in a case statement.\n",
+                    curClass.filename, lineNumber);
         }
         SymbolTable env = classTable.objEnv.get(curClass.name);
         env.enterScope();
@@ -785,14 +804,15 @@ class assign extends Expression {
     public void semant(ClassTable classTable, class_c curClass) {
         AbstractSymbol t1 = classTable.queryObjectEnvironment(curClass.name, name);
         if (t1 == null) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": object identifier " + name + " undefined.");
+            classTable.semantError().format(
+                    "%s:%s: Undeclared identifier %s.\n",
+                    curClass.filename, lineNumber, name);
             t1 = TreeConstants.Object_;
         }
         if (name == TreeConstants.self) {
-            classTable.semantError().println(
-                    curClass.getFilename() + ":" + lineNumber + ": "
-                    + "Cannot assign to 'self'.");
+            classTable.semantError().format(
+                    "%s:%s: Cannot assign to 'self'.\n",
+                    curClass.filename, lineNumber);
         }
         
         expr.semant(classTable, curClass);
@@ -800,10 +820,9 @@ class assign extends Expression {
         if (classTable.isChild(t1, t2, curClass.name)) {
             set_type(t2);
         } else {
-            classTable.semantError().println(
-                    curClass.getFilename() + ":" + lineNumber + ": Type " 
-                    + t2 + " of assigned expression does not conform to declared type "
-                    + t1 + " of identifier " + name + ".");
+            classTable.semantError().format(
+                    "%s:%s: Inferred type %s of assigned expression does not conform to declared type %s of identifier %s.\n",
+                    curClass.filename, lineNumber, t2, t1, name);
             set_type(TreeConstants.Object_);
         }
     }
@@ -879,32 +898,36 @@ class static_dispatch extends Expression {
             ((Expression) e.nextElement()).semant(classTable, curClass);
         }
         if (!classTable.isChild(type_name, expr.get_type(), curClass.name)) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": " + expr.get_type() + " is not a subclass of " + type_name);
-            set_type(TreeConstants.Object_);
+            classTable.semantError().format(
+                    "%s:%s: Expression type %s does not conform to declared static dispatch type %s.\n",
+                    curClass.filename, lineNumber, expr.get_type(), type_name);
+            set_type(expr.get_type());
             return;
         }
         ArrayList<AbstractSymbol> list = classTable.queryMethodEnvironment(type_name, name);
         if (list == null) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": " + type_name + " has no method " + name);
+            classTable.semantError().format(
+                    "%s:%s: Dispatch to undefined method %s.\n",
+                    curClass.filename, lineNumber, name);
             set_type(TreeConstants.Object_);
         } else {
-            if (list.size() != actual.getLength() + 1) {
-                classTable.semantError(curClass).println(
-                        lineNumber + ": length of parameters mismatch.");
+            if ((list.size() - 1) / 2 != actual.getLength()) {
+                classTable.semantError().format(
+                        "%s:%s: Incompatible number of parameters in call of method %s.\n",
+                        curClass.filename, lineNumber, name);
                 set_type(TreeConstants.Object_);
             } else {
                 for (int i = 0; i < actual.getLength(); i++) {
-                    if (!classTable.isChild(list.get(i),
+                    if (!classTable.isChild(list.get(2*i + 1),
                             ((Expression) actual.getNth(i)).get_type(), 
                             curClass.name)) {
-                                classTable.semantError(curClass).println(
-                                        lineNumber + ": " + ((Expression) actual.getNth(i)).get_type() 
-                                        + " is not a subclass of " + list.get(i));
-                                set_type(TreeConstants.Object_);
-                                return;
-                            }
+                        classTable.semantError().format(
+                                "%s:%s: In call of method %s, type %s of parameter %s does not conform to declared type %s.\n",
+                                curClass.filename, lineNumber, name, ((Expression) actual.getNth(i)).get_type(),
+                                list.get(2*i), list.get(2*i + 1));
+                        set_type(TreeConstants.Object_);
+                        return;
+                    }
                 }
                 AbstractSymbol tlast = list.get(list.size() - 1);
                 if (tlast == TreeConstants.SELF_TYPE) {
@@ -987,26 +1010,28 @@ class dispatch extends Expression {
         }
         ArrayList<AbstractSymbol> list = classTable.queryMethodEnvironment(t0p, name);
         if (list == null) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": " + t0p + " has no method " + name);
+            classTable.semantError().format(
+                    "%s:%s: Dispatch to undefined method %s.\n",
+                    curClass.filename, lineNumber, name);
             set_type(TreeConstants.Object_);
         } else {
-            if (list.size() != actual.getLength() + 1) {
-                classTable.semantError(curClass).println(
-                        lineNumber + ": length of parameters mismatch.");
+            if ((list.size() - 1) / 2 != actual.getLength()) {
+                classTable.semantError().format(
+                        "%s:%s: Incompatible number of parameters in call of method %s.\n",
+                        curClass.filename, lineNumber, name);
                 set_type(TreeConstants.Object_);
             } else {
                 for (int i = 0; i < actual.getLength(); i++) {
-                    if (!classTable.isChild(list.get(i),
+                    if (!classTable.isChild(list.get(2*i + 1),
                             ((Expression) actual.getNth(i)).get_type(), 
                             curClass.name)) {
-                                classTable.semantError().format(
-                    "%s:%s: In call of method %s, type %s does not conform to declared type %s.\n",
-                    curClass.getFilename(), lineNumber, name, 
-                    ((Expression) actual.getNth(i)).get_type(), list.get(i));
-                                set_type(TreeConstants.Object_);
-                                return;
-                            }
+                        classTable.semantError().format(
+                                "%s:%s: In call of method %s, type %s of parameter %s does not conform to declared type %s.\n",
+                                curClass.filename, lineNumber, name, ((Expression) actual.getNth(i)).get_type(),
+                                list.get(2*i), list.get(2*i + 1));
+                        set_type(TreeConstants.Object_);
+                        return;
+                    }
                 }
                 AbstractSymbol tlast = list.get(list.size() - 1);
                 if (tlast == TreeConstants.SELF_TYPE) {
@@ -1075,8 +1100,9 @@ class cond extends Expression {
         then_exp.semant(classTable, curClass);
         else_exp.semant(classTable, curClass);
         if (pred.get_type() != TreeConstants.Bool) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": Require Bool, " + pred.get_type() + " given.");
+            classTable.semantError().format(
+                    "%s:%s: If condition does not have type Bool.\n",
+                    curClass.filename, lineNumber);
             set_type(TreeConstants.Object_);
         } else {
             set_type(classTable.leastUpperBound(
@@ -1135,8 +1161,9 @@ class loop extends Expression {
         pred.semant(classTable, curClass);
         body.semant(classTable, curClass);
         if (pred.get_type() != TreeConstants.Bool) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": The predicate of a loop must have type Bool.");
+            classTable.semantError().format(
+                    "%s:%s: If condition does not have type Bool.\n",
+                    curClass.filename, lineNumber);
         }
         set_type(TreeConstants.Object_);
     }
@@ -1197,8 +1224,9 @@ class typcase extends Expression {
             branch br = ((branch) e.nextElement());
             br.semant(classTable, curClass);
             if (met.contains(br.type_decl)) {
-                classTable.semantError(curClass).println(
-                        lineNumber + ": Each branch of a case must all have distinct types.");
+                classTable.semantError().format(
+                        "%s:%s: Duplicate branch %s in case statement.\n",
+                        curClass.filename, br.lineNumber, br.type_decl);
             }
             met.add(br.type_decl);
         }
@@ -1326,8 +1354,9 @@ class let extends Expression {
         SymbolTable env = classTable.objEnv.get(curClass.name);
         env.enterScope();
         if (identifier == TreeConstants.self) {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": cannot bind self in a let.");
+            classTable.semantError().format(
+                    "%s:%s: 'self' cannot be bound in a 'let' expression.\n",
+                    curClass.filename, lineNumber);
         } else { 
             env.addId(identifier, type_decl);
         }
@@ -1336,8 +1365,9 @@ class let extends Expression {
         if (classTable.isChild(type_decl, init.get_type(), curClass.name)) {
             set_type(body.get_type());
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": " + init.get_type() + " is not a subclass of " + type_decl);
+            classTable.semantError().format(
+                    "%s:%s: Inferred type %s of initialization of identifier %s does not conform to declared type %s.\n",
+                    curClass.filename, lineNumber, init.get_type(), identifier, type_decl);
             set_type(TreeConstants.Object_);
         }
     }
@@ -1396,8 +1426,9 @@ class plus extends Expression {
                 && e2.get_type() == TreeConstants.Int) {
             set_type(TreeConstants.Int);
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": The operands of + must have type Int.");
+            classTable.semantError().format(
+                    "%s:%s: non-Int arguments: %s + %s.\n",
+                    curClass.filename, lineNumber, e1.get_type(), e2.get_type());
             set_type(TreeConstants.Object_);
         }
     }
@@ -1456,8 +1487,9 @@ class sub extends Expression {
                 && e2.get_type() == TreeConstants.Int) {
             set_type(TreeConstants.Int);
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": The operands of - must have type Int.");
+            classTable.semantError().format(
+                    "%s:%s: non-Int arguments: %s - %s.\n",
+                    curClass.filename, lineNumber, e1.get_type(), e2.get_type());
             set_type(TreeConstants.Object_);
         }
     }
@@ -1516,8 +1548,9 @@ class mul extends Expression {
                 && e2.get_type() == TreeConstants.Int) {
             set_type(TreeConstants.Int);
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": The operands of * must have type Int.");
+            classTable.semantError().format(
+                    "%s:%s: non-Int arguments: %s * %s.\n",
+                    curClass.filename, lineNumber, e1.get_type(), e2.get_type());
             set_type(TreeConstants.Object_);
         }
     }
@@ -1576,8 +1609,9 @@ class divide extends Expression {
                 && e2.get_type() == TreeConstants.Int) {
             set_type(TreeConstants.Int);
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": The operands of / must have type Int.");
+            classTable.semantError().format(
+                    "%s:%s: non-Int arguments: %s / %s.\n",
+                    curClass.filename, lineNumber, e1.get_type(), e2.get_type());
             set_type(TreeConstants.Object_);
         }
     }
@@ -1627,8 +1661,9 @@ class neg extends Expression {
         if (e1.get_type() == TreeConstants.Int) {
             set_type(TreeConstants.Int);
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": The operand of neg must have type Int");
+            classTable.semantError().format(
+                    "%s:%s: non-Int arguments: ~%s.\n",
+                    curClass.filename, lineNumber, e1.get_type());
             set_type(TreeConstants.Object_);
         }
     }
@@ -1687,8 +1722,9 @@ class lt extends Expression {
                 && e2.get_type() == TreeConstants.Int) {
             set_type(TreeConstants.Bool);
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": The operands of < should be Int.");
+            classTable.semantError().format(
+                    "%s:%s: non-Int arguments: %s < %s.\n",
+                    curClass.filename, lineNumber, e1.get_type(), e2.get_type());
             set_type(TreeConstants.Object_);
         }
     }
@@ -1749,8 +1785,9 @@ class eq extends Expression {
                 set_type(TreeConstants.Bool);
             } else {
                 set_type(TreeConstants.Object_);
-                classTable.semantError(curClass).println(
-                        lineNumber + ": Two operands of = must have the same type for Int, String and Bool.");
+                classTable.semantError().format(
+                        "%s:%s: Illegal comparison with a basic type.\n",
+                        curClass.filename, lineNumber);
             }
         } else {
             set_type(TreeConstants.Bool);
@@ -1811,8 +1848,9 @@ class leq extends Expression {
                 && e2.get_type() == TreeConstants.Int) {
             set_type(TreeConstants.Bool);
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": The operands of <= should be Bool.");
+            classTable.semantError().format(
+                    "%s:%s: non-Int arguments: %s <= %s.\n",
+                    curClass.filename, lineNumber, e1.get_type(), e2.get_type());
             set_type(TreeConstants.Object_);
         }
     }
@@ -1862,8 +1900,9 @@ class comp extends Expression {
         if (e1.get_type() == TreeConstants.Bool) {
             set_type(TreeConstants.Bool);
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": The operand of neg should be Bool");
+            classTable.semantError().format(
+                    "%s:%s: 'not' operand does not have type Bool.\n",
+                    curClass.filename, lineNumber);
             set_type(TreeConstants.Object_);
         }
     }
@@ -2048,8 +2087,9 @@ class new_ extends Expression {
         } else if (classTable.containsClass(type_name)) {
             set_type(type_name);
         } else {
-            classTable.semantError(curClass).println(
-                    lineNumber + ": Undefined class: " + type_name);
+            classTable.semantError().format(
+                    "%s:%s: 'new' used with undefined class %s.\n",
+                    curClass.filename, lineNumber, type_name);
             set_type(TreeConstants.Object_);
         }
     }
@@ -2180,9 +2220,9 @@ class object extends Expression {
     public void semant(ClassTable classTable, class_c curClass) {
         AbstractSymbol type = classTable.queryObjectEnvironment(curClass.name, name);
         if (type == null) {
-            classTable.semantError().println(
-                    curClass.getFilename() + ":" + lineNumber
-                    + ": Undeclared identifier " + name + ".");
+            classTable.semantError().format(
+                    "%s:%s: Undeclared identifier %s.\n",
+                    curClass.filename, lineNumber, name);
             set_type(TreeConstants.Object_);
         } else {
             set_type(type);

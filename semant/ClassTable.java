@@ -21,11 +21,11 @@ class ClassTable {
     public HashMap<AbstractSymbol, SymbolTable> methodEnv;
     
     private class ClassNode {
-        private class_c class_c;
+        private class_c curClass;
         private ArrayList<ClassNode> children;
         
-        private ClassNode(class_c class_c) {
-            this.class_c = class_c;
+        private ClassNode(class_c curClass) {
+            this.curClass = curClass;
             this.children = new ArrayList<ClassNode>();
         }
         
@@ -34,55 +34,85 @@ class ClassTable {
         }
     }
     
-    private void initRoot(class_c class_c) {
-        root = new ClassNode(class_c);
-        classMap.put(class_c.name, root);
+    private void initRoot(class_c curClass) {
+        root = new ClassNode(curClass);
+        classMap.put(curClass.name, root);
     }
     
-    private void addBasicClass(class_c class_c) {
-        ClassNode node = new ClassNode(class_c);
-        classMap.put(class_c.name, node);
-        classMap.get(class_c.parent).addChild(node);
+    private void addBasicClass(class_c curClass) {
+        ClassNode node = new ClassNode(curClass);
+        classMap.put(curClass.name, node);
+        classMap.get(curClass.parent).addChild(node);
     }
     
     private void BuildInheritGraph(Classes cls) {
         for (Enumeration e = cls.getElements(); e.hasMoreElements(); ) {
-            class_c class_c = (class_c) e.nextElement();
-            if (class_c.name == TreeConstants.SELF_TYPE) {
-                semantError(class_c).println(
-                        "Invalid class name SELF_TYPE.");
+            class_c curClass = (class_c) e.nextElement();
+            if (curClass.name == TreeConstants.SELF_TYPE ||
+                curClass.name == TreeConstants.Object_ ||
+                curClass.name == TreeConstants.Int ||
+                curClass.name == TreeConstants.Bool ||
+                curClass.name == TreeConstants.Str ||
+                curClass.name == TreeConstants.IO) {
+                semantError().format(
+                        "%s:%s: Redefinition of basic class %s.\n",
+                        curClass.filename, curClass.lineNumber, curClass.name);
                 return;
             }
-            ClassNode node = new ClassNode(class_c);
-            if (classMap.containsKey(class_c.name)) {
-                semantError(class_c).println("Class " + class_c.name.getString() + " redefined.");
+            ClassNode node = new ClassNode(curClass);
+            if (classMap.containsKey(curClass.name)) {
+                semantError().format(
+                        "%s:%s: Class %s was previously defined.\n",
+                        curClass.filename, curClass.lineNumber, curClass.name);
                 return;
             }
-            classMap.put(class_c.name, node);
+            classMap.put(curClass.name, node);
         }
         
         for (Enumeration e = cls.getElements(); e.hasMoreElements(); ) {
-            class_c class_c = (class_c) e.nextElement();
+            class_c curClass = (class_c) e.nextElement();
             
-            if (class_c.parent == TreeConstants.Int ||
-                    class_c.parent == TreeConstants.Bool ||
-                    class_c.parent == TreeConstants.Str) {
-                semantError(class_c).println("Should not inherit from " + class_c.parent.getString() + ".");
-            }
-            
-            ClassNode node = classMap.get(class_c.parent);
-            if (node == null) {
-                semantError(class_c).println("Parent class " + class_c.parent.getString() + " undefined.");
+            if (curClass.parent == TreeConstants.Int ||
+                    curClass.parent == TreeConstants.Bool ||
+                    curClass.parent == TreeConstants.Str ||
+                    curClass.parent == TreeConstants.SELF_TYPE) {
+                semantError().format(
+                        "%s:%s: Class %s cannot inherit class %s.\n",
+                        curClass.filename, curClass.lineNumber, curClass.name, curClass.parent);
                 return;
+            } 
+
+            ClassNode node = classMap.get(curClass.parent);
+            if (node == null) {
+                    semantError().format(
+                            "%s:%s: Class %s inherits from an undefined class %s.\n",
+                            curClass.filename, curClass.lineNumber, curClass.name, curClass.parent);
+                    return;
             }
-            
-            node.addChild(classMap.get(class_c.name));
+            node.addChild(classMap.get(curClass.name));
         }
         
         checkCycles();
     }
     
     private void checkCycles() {
+        // DFS
+        HashSet<ClassNode> visited = new HashSet<ClassNode>();
+        dfs(root, visited);
+        
+        if (visited.size() < classMap.size()) {
+            semantError().println("Inheritance graph has cycles.");
+        }
+    }
+    
+    private void dfs(ClassNode curNode, HashSet<ClassNode> visited) {
+        visited.add(curNode);
+        for (Iterator<ClassNode> iter = curNode.children.iterator(); iter.hasNext(); ) {
+            dfs(iter.next(), visited);
+        }
+    }
+    
+    /*private void checkCycles() {
         // DFS
         HashSet<ClassNode> visited = new HashSet<ClassNode>();
         if (!dfs(root, visited)) {
@@ -101,7 +131,7 @@ class ClassTable {
     
     private boolean dfs(ClassNode curNode, HashSet<ClassNode> visited) {
         if (visited.contains(curNode)) {
-            semantError(curNode.class_c).println("Detect cycles.");
+            semantError(curNode.class_c).println("Inheritance graph has cycles.");
             return false;
         }
         
@@ -112,7 +142,7 @@ class ClassTable {
             }
         }
         return true;
-    }
+    }*/
     
     /**
      * Require the inheritance graph to be valid. whether c2 <= c1
@@ -146,7 +176,7 @@ class ClassTable {
             if (c == c1) {
                 return true;
             }
-            c = classMap.get(c).class_c.parent;
+            c = classMap.get(c).curClass.parent;
         }
         return false;
     }
@@ -158,14 +188,14 @@ class ClassTable {
                 classMap.entrySet().iterator(); itr.hasNext(); ) {
             Entry<AbstractSymbol, ClassNode> entry = itr.next();
             AbstractSymbol className = entry.getKey();
-            class_c class_c = entry.getValue().class_c;
+            class_c curClass = entry.getValue().curClass;
             
             SymbolTable objTab = new SymbolTable();
             objTab.enterScope();
             SymbolTable methodTab = new SymbolTable();
             methodTab.enterScope();
             
-            for (Enumeration e = class_c.features.getElements(); e.hasMoreElements(); ) {
+            for (Enumeration e = curClass.features.getElements(); e.hasMoreElements(); ) {
                 Feature ft = (Feature) e.nextElement();
                 if (ft instanceof attr) {
                     attr a = (attr) ft;
@@ -174,6 +204,7 @@ class ClassTable {
                     method m = (method) ft;
                     ArrayList<AbstractSymbol> list = new ArrayList<AbstractSymbol>();
                     for (int i = 0; i < m.formals.getLength(); i++) {
+                        list.add(((formalc) m.formals.getNth(i)).name);
                         list.add(((formalc) m.formals.getNth(i)).type_decl);
                     }
                     list.add(m.return_type);
@@ -227,11 +258,11 @@ class ClassTable {
         ArrayList<AbstractSymbol> path2 = new ArrayList<AbstractSymbol>();
         while (c1 != TreeConstants.No_class) {
             path1.add(0, c1);
-            c1 = classMap.get(c1).class_c.parent;
+            c1 = classMap.get(c1).curClass.parent;
         }
         while (c2 != TreeConstants.No_class) {
             path2.add(0, c2);
-            c2 = classMap.get(c2).class_c.parent;
+            c2 = classMap.get(c2).curClass.parent;
         }
         
         int i = 0;
@@ -250,7 +281,7 @@ class ClassTable {
             if (type != null) {
                 return type;
             }
-            c = classMap.get(c).class_c.parent;
+            c = classMap.get(c).curClass.parent;
         }
         return null;
     }
@@ -262,7 +293,7 @@ class ClassTable {
             if (ret != null) {
                 return ret;
             }
-            c = classMap.get(c).class_c.parent;
+            c = classMap.get(c).curClass.parent;
         }
         return null;
     }
