@@ -181,6 +181,7 @@ class ClassTable {
         return false;
     }
     
+    // The parts of semantic analysis which 
     public void buildEnvironment() {
         objEnv = new HashMap<AbstractSymbol, SymbolTable>();
         methodEnv = new HashMap<AbstractSymbol, SymbolTable>();
@@ -221,12 +222,16 @@ class ClassTable {
         if (!classMap.containsKey(TreeConstants.Main)) {
             semantError().println("Class Main is not defined.");
         } else {
+            ClassNode node = classMap.get(TreeConstants.Main);
             ArrayList<AbstractSymbol> paraList = 
                     (ArrayList<AbstractSymbol>) methodEnv.get(TreeConstants.Main).probe(TreeConstants.main_meth);
             if (paraList == null) {
-                semantError().println("Method main is not defined in class Main.");
+                semantError().format(
+                        "%s:%s: Method main is not defined in class Main.\n",
+                        node.curClass.filename, node.curClass.lineNumber);
             } else if (paraList.size() > 1) {
-                semantError().println("Method main takes no formal parameters.");
+                semantError().format("%s:%s: Method main in class Main takes no formal parameters.\n",
+                        node.curClass.filename, node.curClass.lineNumber);
             }
         }
     }

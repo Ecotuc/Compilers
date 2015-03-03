@@ -897,11 +897,17 @@ class static_dispatch extends Expression {
         for (Enumeration e = actual.getElements(); e.hasMoreElements(); ) {
             ((Expression) e.nextElement()).semant(classTable, curClass);
         }
-        if (!classTable.isChild(type_name, expr.get_type(), curClass.name)) {
+        if (!classTable.containsClass(type_name)) {
+            classTable.semantError().format(
+                    "%s:%s: Undefined static dispatch type %s.\n",
+                    curClass.filename, lineNumber, type_name);
+            set_type(TreeConstants.Object_);
+            return;
+        } else if (!classTable.isChild(type_name, expr.get_type(), curClass.name)) {
             classTable.semantError().format(
                     "%s:%s: Expression type %s does not conform to declared static dispatch type %s.\n",
                     curClass.filename, lineNumber, expr.get_type(), type_name);
-            set_type(expr.get_type());
+            set_type(TreeConstants.Object_);
             return;
         }
         ArrayList<AbstractSymbol> list = classTable.queryMethodEnvironment(type_name, name);
