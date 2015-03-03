@@ -113,10 +113,6 @@ import java_cup.runtime.Symbol;
                                               AbstractTable.idtable.addString(yytext())); }
 <YYINITIAL> [a-z][a-zA-Z0-9_]*              { return new Symbol(TokenConstants.OBJECTID, 
                                               AbstractTable.idtable.addString(yytext())); }
-<YYINITIAL> "self"                          { return new Symbol(TokenConstants.OBJECTID, 
-                                              AbstractTable.idtable.addString(yytext())); }
-<YYINITIAL> "SELF_TYPE"                     { return new Symbol(TokenConstants.TYPEID, 
-                                              AbstractTable.idtable.addString(yytext())); }
                                               
 <YYINITIAL> "=>"                            { return new Symbol(TokenConstants.DARROW); }
 <YYINITIAL> "("                             { return new Symbol(TokenConstants.LPAREN); }
