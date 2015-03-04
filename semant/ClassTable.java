@@ -181,7 +181,6 @@ class ClassTable {
         return false;
     }
     
-    // The parts of semantic analysis which 
     public void buildEnvironment() {
         objEnv = new HashMap<AbstractSymbol, SymbolTable>();
         methodEnv = new HashMap<AbstractSymbol, SymbolTable>();
