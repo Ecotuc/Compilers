@@ -199,9 +199,25 @@ class ClassTable {
                 Feature ft = (Feature) e.nextElement();
                 if (ft instanceof attr) {
                     attr a = (attr) ft;
+                    
+                    if (objTab.probe(a.name) != null) {
+                        semantError().format(
+                                "%s:%s: Attribute %s is multiply defined in class.\n",
+                                curClass.filename, a.lineNumber, a.name);
+                        continue;
+                    }
+                    
                     objTab.addId(a.name, a.type_decl);
                 } else if (ft instanceof method) {
                     method m = (method) ft;
+                    
+                    if (methodTab.probe(m.name) != null) {
+                        semantError().format(
+                                "%s:%s: Method %s is multiply defined in class.\n",
+                                curClass.filename, m.lineNumber, m.name);
+                        continue;
+                    }
+                    
                     ArrayList<AbstractSymbol> list = new ArrayList<AbstractSymbol>();
                     for (int i = 0; i < m.formals.getLength(); i++) {
                         list.add(((formalc) m.formals.getNth(i)).name);
