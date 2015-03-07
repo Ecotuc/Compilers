@@ -54,11 +54,11 @@ class StringSymbol extends AbstractSymbol {
         s.println(CgenSupport.WORD
                 + (CgenSupport.DEFAULT_OBJFIELDS + CgenSupport.STRING_SLOTS + (str
                         .length() + 4) / 4)); // object size
+        
         s.print(CgenSupport.WORD);
-
-        /* Add code to reference the dispatch table for class String here */
-
-        s.println(""); // dispatch table
+        CgenSupport.emitDispTableRef(TreeConstants.Str, s); // dispatch table
+        s.println("");
+        
         s.print(CgenSupport.WORD);
         lensym.codeRef(s);
         s.println(""); // length

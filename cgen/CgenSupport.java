@@ -91,7 +91,7 @@ class CgenSupport {
     // Opcodes
     final static String JALR = "\tjalr\t";
     final static String JAL = "\tjal\t";
-    final static String RET = "\tjr\t" + RA + "\t";
+    final static String RET = "\tjr\t" + RA;
 
     final static String SW = "\tsw\t";
     final static String LW = "\tlw\t";
@@ -650,7 +650,22 @@ class CgenSupport {
      * */
     static void emitPush(String reg, PrintStream s) {
         emitStore(reg, 0, SP, s);
-        emitAddiu(SP, SP, -4, s);
+        emitAddiu(SP, SP, -WORD_SIZE, s);
+    }
+
+    /**
+     * Emit a sequence of instructions to pop stack into a register. Stack
+     * shrinks toward larger addresses.
+     * 
+     * @param reg
+     *            the register
+     * @param s
+     *            the output stream
+     * */
+    static void emitPop(String reg, PrintStream s) {
+        
+        emitLoad(reg, 1, SP, s);
+        emitAddiu(SP, SP, WORD_SIZE, s);
     }
 
     /**

@@ -22,7 +22,10 @@ PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 // This is a project skeleton file
 
 import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Vector;
+import java.util.Stack;
 import java.util.Enumeration;
 
 /**
@@ -41,6 +44,64 @@ class CgenClassTable extends SymbolTable {
     private int stringclasstag;
     private int intclasstag;
     private int boolclasstag;
+
+    // whether garbage collector is used?
+    public boolean gcUsed; 
+    
+    // Useful when generating code for labels
+    public int labelCount;
+
+    public HashMap<AbstractSymbol, HashMap<AbstractSymbol, Integer>> attrOffsetMap;
+    public HashMap<AbstractSymbol, HashMap<AbstractSymbol, Integer>> methodOffsetMap;
+    
+    // two HashMap are combined to store <class>.<method>
+    public HashMap<AbstractSymbol, ArrayList<AbstractSymbol>> classMap;
+    public HashMap<AbstractSymbol, ArrayList<AbstractSymbol>> methodMap;
+
+    // store height of class in inheritance tree.
+    private HashMap<AbstractSymbol, Integer> heightMap;
+    // store range of classtag for children of class (include itself) in
+    // inheritance tree.
+    // Because I use depth first search to tag class, so the range is interval,
+    // saved as [min, max]
+    // This property is convenient for code generation for 'case'
+    private HashMap<AbstractSymbol, int[]> rangeMap;
+
+    public int getHeight(AbstractSymbol className) {
+        return heightMap.get(className);
+    }
+
+    public int[] getChildrenRange(AbstractSymbol className) {
+        return rangeMap.get(className);
+    }
+
+    // Inner use by sortNdsAndInitMap
+    private void dfs(CgenNode nd) {
+        nds.add(nd);
+        int height = heightMap.get(nd.name);
+        int min = nds.indexOf(nd);
+        int max = min;
+
+        for (Enumeration e = nd.getChildren(); e.hasMoreElements();) {
+            CgenNode childNode = (CgenNode) e.nextElement();
+            heightMap.put(childNode.name, height + 1);
+            dfs(childNode);
+            max = rangeMap.get(childNode.name)[1];
+        }
+
+        rangeMap.put(nd.name, new int[] { min, max });
+    }
+
+    // sort nds according to depth first search on inheritance tree
+    // and initialize heightMap and rangeMap
+    private void sortNdsAndInitMap() {
+        nds.clear();
+        heightMap = new HashMap<AbstractSymbol, Integer>();
+        rangeMap = new HashMap<AbstractSymbol, int[]>();
+        CgenNode root = root();
+        heightMap.put(root.name, 0);
+        dfs(root);
+    }
 
     // The following methods emit code for constants and global
     // declarations.
@@ -139,8 +200,8 @@ class CgenClassTable extends SymbolTable {
      * Class names should have been added to the string table (in the supplied
      * code, it is done during the construction of the inheritance graph), and
      * code for emitting string constants as a side effect adds the string's
-     * length to the integer table. The constants are emitted by running
-     * through the stringtable and inttable and producing code for each entry.
+     * length to the integer table. The constants are emitted by running through
+     * the stringtable and inttable and producing code for each entry.
      */
     private void codeConstants() {
         // Add constants that are required by the code generator.
@@ -150,6 +211,281 @@ class CgenClassTable extends SymbolTable {
         AbstractTable.stringtable.codeStringTable(stringclasstag, str);
         AbstractTable.inttable.codeStringTable(intclasstag, str);
         codeBools(boolclasstag);
+    }
+
+    private void codeClassNameTable() {
+        str.print(CgenSupport.CLASSNAMETAB + CgenSupport.LABEL);
+        for (int i = 0; i < nds.size(); i++) {
+            str.print(CgenSupport.WORD);
+            AbstractSymbol name = ((CgenNode) nds.get(i)).name;
+            ((StringSymbol) AbstractTable.stringtable
+                    .addString(name.toString())).codeRef(str);
+            str.println("");
+        }
+    }
+
+    // class_objTab is useful for 'self' and 'SELF_TYPE'
+    private void codeClassObjectTable() {
+        str.print(CgenSupport.CLASSOBJTAB + CgenSupport.LABEL);
+        for (int i = 0; i < nds.size(); i++) {
+            AbstractSymbol name = ((CgenNode) nds.get(i)).name;
+            str.print(CgenSupport.WORD);
+            CgenSupport.emitProtObjRef(name, str);
+            str.println("");
+
+            str.print(CgenSupport.WORD);
+            CgenSupport.emitInitRef(name, str);
+            str.println("");
+        }
+    }
+
+    private void codePrototypeObjects() {
+
+        // used to store attributes of class
+        HashMap<AbstractSymbol, ArrayList<AbstractSymbol>> attrNameMap = new HashMap<AbstractSymbol, ArrayList<AbstractSymbol>>();
+        HashMap<AbstractSymbol, ArrayList<AbstractSymbol>> attrTypeMap = new HashMap<AbstractSymbol, ArrayList<AbstractSymbol>>();
+
+        attrNameMap
+                .put(TreeConstants.No_class, new ArrayList<AbstractSymbol>());
+        attrTypeMap
+                .put(TreeConstants.No_class, new ArrayList<AbstractSymbol>());
+
+        Stack<CgenNode> todoList = new Stack<CgenNode>();
+        todoList.add((CgenNode) probe(TreeConstants.Object_));
+
+        while (!todoList.isEmpty()) {
+            CgenNode nd = todoList.pop();
+            AbstractSymbol className = nd.name;
+
+            ArrayList<AbstractSymbol> attrNameList = new ArrayList<AbstractSymbol>(
+                    attrNameMap.get(nd.getParent()));
+            ArrayList<AbstractSymbol> attrTypeList = new ArrayList<AbstractSymbol>(
+                    attrTypeMap.get(nd.getParent()));
+
+            for (Enumeration e = nd.features.getElements(); e.hasMoreElements();) {
+                Object ft = e.nextElement();
+                if (ft instanceof attr) {
+                    attr a = (attr) ft;
+                    attrNameList.add(a.name);
+                    attrTypeList.add(a.type_decl);
+                }
+            }
+
+            str.println(CgenSupport.WORD + "-1");
+            CgenSupport.emitProtObjRef(className, str);
+            str.print(CgenSupport.LABEL);
+
+            int classTag = nds.indexOf(nd);
+            str.println(CgenSupport.WORD + classTag);
+
+            int objectSize = attrNameList.size()
+                    + CgenSupport.DEFAULT_OBJFIELDS;
+            str.println(CgenSupport.WORD + objectSize);
+
+            str.print(CgenSupport.WORD);
+            CgenSupport.emitDispTableRef(className, str);
+            str.println("");
+
+            for (int i = 0; i < attrTypeList.size(); i++) {
+                str.print(CgenSupport.WORD);
+
+                AbstractSymbol type = attrTypeList.get(i);
+                if (type == TreeConstants.Int || type == TreeConstants.Str
+                        || type == TreeConstants.Bool) {
+                    CgenSupport.emitProtObjRef(type, str);
+                } else {
+                    str.print(0);
+                }
+
+                str.println("");
+            }
+
+            attrNameMap.put(className, attrNameList);
+            attrTypeMap.put(className, attrTypeList);
+
+            HashMap<AbstractSymbol, Integer> attrOffset = new HashMap<AbstractSymbol, Integer>();
+            for (int i = 0; i < attrNameList.size(); i++) {
+                attrOffset.put(attrNameList.get(i),
+                        CgenSupport.DEFAULT_OBJFIELDS + i);
+            }
+            attrOffsetMap.put(className, attrOffset);
+
+            for (Enumeration e = nd.getChildren(); e.hasMoreElements();) {
+                todoList.push((CgenNode) e.nextElement());
+            }
+        }
+    }
+
+    private void codeDispatchTables() {
+        // two HashMap are combined to store <class>.<method>
+        classMap = new HashMap<AbstractSymbol, ArrayList<AbstractSymbol>>();
+        methodMap = new HashMap<AbstractSymbol, ArrayList<AbstractSymbol>>();
+
+        classMap.put(TreeConstants.No_class, new ArrayList<AbstractSymbol>());
+        methodMap.put(TreeConstants.No_class, new ArrayList<AbstractSymbol>());
+
+        Stack<CgenNode> todoList = new Stack<CgenNode>();
+        todoList.add((CgenNode) probe(TreeConstants.Object_));
+
+        while (!todoList.isEmpty()) {
+            CgenNode nd = todoList.pop();
+            AbstractSymbol className = nd.name;
+
+            ArrayList<AbstractSymbol> classList = new ArrayList<AbstractSymbol>(
+                    classMap.get(nd.getParent()));
+            ArrayList<AbstractSymbol> methodList = new ArrayList<AbstractSymbol>(
+                    methodMap.get(nd.getParent()));
+
+            for (Enumeration e = nd.features.getElements(); e.hasMoreElements();) {
+                Object ft = e.nextElement();
+                if (ft instanceof method) {
+                    AbstractSymbol methodName = ((method) ft).name;
+
+                    int index = methodList.indexOf(methodName);
+                    if (index == -1) {
+                        classList.add(className);
+                        methodList.add(methodName);
+                    } else {
+                        classList.set(index, className);
+                    }
+                }
+            }
+
+            CgenSupport.emitDispTableRef(className, str);
+            str.print(CgenSupport.LABEL);
+
+            for (int i = 0; i < methodList.size(); i++) {
+                str.print(CgenSupport.WORD);
+                CgenSupport.emitMethodRef(classList.get(i), methodList.get(i),
+                        str);
+                str.println("");
+            }
+
+            classMap.put(className, classList);
+            methodMap.put(className, methodList);
+
+            HashMap<AbstractSymbol, Integer> methodOffset = new HashMap<AbstractSymbol, Integer>();
+            for (int i = 0; i < methodList.size(); i++) {
+                methodOffset.put(methodList.get(i), i);
+            }
+            methodOffsetMap.put(className, methodOffset);
+
+            for (Enumeration e = nd.getChildren(); e.hasMoreElements();) {
+                todoList.push((CgenNode) e.nextElement());
+            }
+        }
+    }
+
+    private void codeObjectInitializer() {
+        for (Enumeration e1 = nds.elements(); e1.hasMoreElements();) {
+            CgenNode nd = (CgenNode) e1.nextElement();
+
+            CgenSupport.emitInitRef(nd.name, str);
+            str.print(CgenSupport.LABEL);
+
+            CgenSupport.emitAddiu(CgenSupport.SP, CgenSupport.SP, -3
+                    * CgenSupport.WORD_SIZE, str);
+            CgenSupport.emitStore(CgenSupport.FP, 3, CgenSupport.SP, str);
+            CgenSupport.emitStore(CgenSupport.SELF, 2, CgenSupport.SP, str);
+            CgenSupport.emitStore(CgenSupport.RA, 1, CgenSupport.SP, str);
+
+            CgenSupport.emitAddiu(CgenSupport.FP, CgenSupport.SP,
+                    CgenSupport.WORD_SIZE * 3, str);
+            CgenSupport.emitMove(CgenSupport.SELF, CgenSupport.ACC, str);
+
+            if (nd.getParent() != TreeConstants.No_class) {
+                str.print(CgenSupport.JAL);
+                CgenSupport.emitInitRef(nd.getParent(), str);
+                str.println();
+            }
+
+            HashMap<AbstractSymbol, Integer> offsetMap = attrOffsetMap
+                    .get(nd.name);
+            for (Enumeration e2 = nd.features.getElements(); e2
+                    .hasMoreElements();) {
+                Object ft = e2.nextElement();
+                if (ft instanceof attr) {
+                    attr a = (attr) ft;
+                    if (!(a.init instanceof no_expr)) {
+                        SymbolTable env = new SymbolTable();
+                        env.enterScope();
+                        a.init.code(str, nd.name, this, env, 3);
+                        int offset = offsetMap.get(a.name);
+                        CgenSupport.emitStore(CgenSupport.ACC, offset,
+                                CgenSupport.SELF, str);
+                        env.exitScope();
+                        
+                        if (gcUsed) {
+                            // _GenGC_Assign saves $a0, so no need to save here
+                            CgenSupport.emitAddiu(CgenSupport.A1, CgenSupport.SELF, offset * CgenSupport.WORD_SIZE, str);
+                            CgenSupport.emitJal("_GenGC_Assign", str);
+                        }
+                    }
+                }
+            }
+
+            CgenSupport.emitMove(CgenSupport.ACC, CgenSupport.SELF, str);
+            CgenSupport.emitLoad(CgenSupport.FP, 3, CgenSupport.SP, str);
+            CgenSupport.emitLoad(CgenSupport.SELF, 2, CgenSupport.SP, str);
+            CgenSupport.emitLoad(CgenSupport.RA, 1, CgenSupport.SP, str);
+            CgenSupport.emitAddiu(CgenSupport.SP, CgenSupport.SP,
+                    3 * CgenSupport.WORD_SIZE, str);
+            CgenSupport.emitReturn(str);
+        }
+    }
+
+    private void codeClassMethods() {
+        for (Enumeration e1 = nds.elements(); e1.hasMoreElements();) {
+            CgenNode nd = (CgenNode) e1.nextElement();
+            if (nd.basic()) {
+                continue;
+            }
+
+            for (Enumeration e2 = nd.features.getElements(); e2
+                    .hasMoreElements();) {
+                Object ft = e2.nextElement();
+                if (ft instanceof method) {
+                    method m = (method) ft;
+                    CgenSupport.emitMethodRef(nd.name, m.name, str);
+                    str.print(CgenSupport.LABEL);
+
+                    CgenSupport.emitAddiu(CgenSupport.SP, CgenSupport.SP, -3
+                            * CgenSupport.WORD_SIZE, str);
+                    CgenSupport.emitStore(CgenSupport.FP, 3, CgenSupport.SP,
+                            str);
+                    CgenSupport.emitStore(CgenSupport.SELF, 2, CgenSupport.SP,
+                            str);
+                    CgenSupport.emitStore(CgenSupport.RA, 1, CgenSupport.SP,
+                            str);
+
+                    CgenSupport.emitAddiu(CgenSupport.FP, CgenSupport.SP,
+                            CgenSupport.WORD_SIZE * 3, str);
+                    CgenSupport
+                            .emitMove(CgenSupport.SELF, CgenSupport.ACC, str);
+
+                    SymbolTable env = new SymbolTable();
+                    env.enterScope();
+                    for (int i = 0; i < m.formals.getLength(); i++) {
+                        env.addId(((formal) m.formals.getNth(i)).name,
+                                m.formals.getLength() - i);
+                    }
+
+                    m.expr.code(str, nd.name, this, env, 3);
+
+                    CgenSupport
+                            .emitLoad(CgenSupport.FP, 3, CgenSupport.SP, str);
+                    CgenSupport.emitLoad(CgenSupport.SELF, 2, CgenSupport.SP,
+                            str);
+                    CgenSupport
+                            .emitLoad(CgenSupport.RA, 1, CgenSupport.SP, str);
+                    CgenSupport
+                            .emitAddiu(CgenSupport.SP, CgenSupport.SP,
+                                    (3 + m.formals.getLength())
+                                            * CgenSupport.WORD_SIZE, str);
+                    CgenSupport.emitReturn(str);
+                }
+            }
+        }
     }
 
     /**
@@ -345,13 +681,14 @@ class CgenClassTable extends SymbolTable {
 
     /** Constructs a new class table and invokes the code generator */
     public CgenClassTable(Classes cls, PrintStream str) {
+        labelCount = 0;
+
         nds = new Vector();
 
-        this.str = str;
+        methodOffsetMap = new HashMap<AbstractSymbol, HashMap<AbstractSymbol, Integer>>();
+        attrOffsetMap = new HashMap<AbstractSymbol, HashMap<AbstractSymbol, Integer>>();
 
-        stringclasstag = 0 /* Change to your String class tag here */;
-        intclasstag = 0 /* Change to your Int class tag here */;
-        boolclasstag = 0 /* Change to your Bool class tag here */;
+        this.str = str;
 
         enterScope();
         if (Flags.cgen_debug)
@@ -361,6 +698,18 @@ class CgenClassTable extends SymbolTable {
         installClasses(cls);
         buildInheritanceTree();
 
+        sortNdsAndInitMap();
+
+        stringclasstag = nds.indexOf(probe(TreeConstants.Str));
+        intclasstag = nds.indexOf(probe(TreeConstants.Int));
+        boolclasstag = nds.indexOf(probe(TreeConstants.Bool));
+
+        if (Flags.cgen_Memmgr == Flags.GC_NOGC) {
+            gcUsed = false;
+        } else {
+            gcUsed = true;
+        }
+        
         code();
 
         exitScope();
@@ -383,19 +732,43 @@ class CgenClassTable extends SymbolTable {
             System.out.println("coding constants");
         codeConstants();
 
-        // Add your code to emit
-        // - prototype objects
-        // - class_nameTab
-        // - dispatch tables
+        // class_nameTab
+        if (Flags.cgen_debug) {
+            System.out.println("coding class_nameTab");
+        }
+        codeClassNameTable();
+
+        // class_objTab
+        if (Flags.cgen_debug) {
+            System.out.println("coding class_objTab");
+        }
+        codeClassObjectTable();
+
+        // dispatch tables
+        if (Flags.cgen_debug) {
+            System.out.println("coding dispatch tables");
+        }
+        codeDispatchTables();
+
+        // prototype objects
+        if (Flags.cgen_debug) {
+            System.out.println("coding prototype objects");
+        }
+        codePrototypeObjects();
 
         if (Flags.cgen_debug)
             System.out.println("coding global text");
         codeGlobalText();
 
-        // Add your code to emit
-        // - object initializer
-        // - the class methods
-        // - etc...
+        // object initializer
+        if (Flags.cgen_debug)
+            System.out.println("coding object initializer");
+        codeObjectInitializer();
+
+        // class methods
+        if (Flags.cgen_debug)
+            System.out.println("coding class methods");
+        codeClassMethods();
     }
 
     /** Gets the root of the inheritance tree */
